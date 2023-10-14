@@ -101,31 +101,24 @@ class Patcher:
 
     def recombine(self, image_path, output_path):
 
-        print("Beginning Recombination")
-
         patches_dataset = self.patches_file[image_path.split(os.path.sep)[-1][:-4]]["patches"]
         num_x_patches = patches_dataset.attrs["num_x_patches"]
         num_y_patches = patches_dataset.attrs["num_y_patches"]
         patch_size = patches_dataset.attrs["patch_size"]
         overlap = [patches_dataset.attrs["overlap_x"], patches_dataset.attrs["overlap_y"]]
 
-        patches = np.empty([num_x_patches * num_y_patches, patch_size, patch_size, 4], dtype=np.uint8)
+        patches = np.empty([num_x_patches * num_y_patches, patch_size, patch_size, 3], dtype=np.uint8)
 
         print("Extracting Patches")
+        
         for i, patch in enumerate(self.PatchGrabber(image_path, self.patches_file)):
 
                 patches[i] = patch
-
-        print("Array Size" + str(patches.size * patches.itemsize))
-
-
-        #If we're patching an RGB image, make sure we can avg the overlaps without overflow
-        ''' ** Update, this doubles the size of the array in the register so let's not do this '''
-        # if patches.dtype == np.uint8:
-        #     patches = patches.astype(np.uint16)
         
         start = 0
+
         print("Beginning Recombination")
+
         recon_img = patches[0][:-overlap[1], :-overlap[0]] #Set first patch in place
 
         for row_num in range(num_y_patches):
@@ -191,7 +184,7 @@ class Patcher:
                 rows = recon_img
             else:
                 rows = np.concatenate((rows, recon_img), axis=0)
-                print("Array Size" + str(rows.size * rows.itemsize))
+                # print("Array Size" + str(rows.size * rows.itemsize))
 
         print("New shape: {}".format(rows.shape))
 
@@ -235,7 +228,7 @@ class Patcher:
             # print(patch_anchor)
             # print(patch_anchor)
             self.patch_index += 1
-            image_array =  np.array(self.image.read_region((*list(patch_anchor),), patch_level, (patch_size, patch_size)))[]
+            image_array =  np.array(self.image.read_region((*list(patch_anchor),), patch_level, (patch_size, patch_size)))[:,:,:3] #Just grab RGB not A
             
             return image_array
         
