@@ -120,8 +120,9 @@ class Patcher:
 
 
         #If we're patching an RGB image, make sure we can avg the overlaps without overflow
-        if patches.dtype == np.uint8:
-            patches = patches.astype(np.uint16)
+        ''' ** Update, this doubles the size of the array in the register so let's not do this '''
+        # if patches.dtype == np.uint8:
+        #     patches = patches.astype(np.uint16)
         
         start = 0
         print("Beginning Recombination")
@@ -182,7 +183,7 @@ class Patcher:
                         t[:overlap[1]] = self.calc_avg_overlap(up_patch, t, overlap[1], 'y')
                         recon_img = np.concatenate((recon_img, curr_patch), axis=1) #don't remove anything if final patch
 
-                print("Array Size" + str(recon_img.size * recon_img.itemsize))
+                
                 
 
             start += num_x_patches
@@ -190,23 +191,25 @@ class Patcher:
                 rows = recon_img
             else:
                 rows = np.concatenate((rows, recon_img), axis=0)
+                print("Array Size" + str(rows.size * rows.itemsize))
 
         print("New shape: {}".format(rows.shape))
+
+        return rows
         
-        vi = pyvips.Image.new_from_array(rows)
-        vi.write_to_file(output_path, tile=true, compression=jpeg, bigtiff=true)
+
     
         
     def calc_avg_overlap(self, region1, region2, overlap, orientation):
         if orientation == 'x':
             overlap_left = region1[:, -overlap:]
             overlap_right = region2[:, :overlap]
-            overlap_average = np.add(overlap_left, overlap_right) / 2
+            overlap_average = (overlap_left / 2) + (overlap_right / 2)
             return overlap_average
         elif orientation == 'y':
             overlap_up = region1[-overlap:]
             overlap_down = region2[:overlap]
-            overlap_average = np.add(overlap_up, overlap_down) / 2
+            overlap_average = (overlap_up / 2) + (overlap_down / 2)
             return overlap_average
     
 
@@ -232,7 +235,7 @@ class Patcher:
             # print(patch_anchor)
             # print(patch_anchor)
             self.patch_index += 1
-            image_array =  np.array(self.image.read_region((*list(patch_anchor),), patch_level, (patch_size, patch_size)))
+            image_array =  np.array(self.image.read_region((*list(patch_anchor),), patch_level, (patch_size, patch_size)))[]
             
             return image_array
         
