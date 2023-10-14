@@ -13,11 +13,23 @@ QUALITY = 100
 
 class Patcher:
 
-    def __init__(self, patch_path):
-        self.patches_file = h5py.File(os.path.join(patch_path, "patches.h5"), "a")
+    def __init__(self, patch_path, use_hdf5=True):
+
+        #create PatchHandler Object as abstraction for handling how / where to save patches
+        self.patch_handler = self.PatchHandler(patch_path, use_hdf5=True)
+
+        #here temporarily until moved to patch handler
+        try: 
+            self.patches_file = h5py.File(os.path.join(patch_path, "patches.h5"), "w")
+        except:
+            self.patches_file = h5py.File(os.path.join(patch_path, "patches.h5"), "r")
         
     def __getitem__(self, key):
-        return self.PatchGrabber(key, self.patches_file)
+        image_name = key.split(os.path.sep)[-1][:-4]
+        if image_name not in self.patches_file:
+            print("No patches exist for the specified image")
+        else:
+            return self.PatchGrabber(key, self.patches_file)
     
     def __del__(self):
         self.patches_file.close()
@@ -26,10 +38,11 @@ class Patcher:
 
         #create group in hdf5 file to store patches
         image_name = image_path.split(os.path.sep)[-1][:-4]
-        group = self.patches_file.create_group(image_name)  
 
         if f"{image_name}/patches" in self.patches_file:
             return
+
+        group = self.patches_file.create_group(image_name)  
         
         im = op.OpenSlide(image_path)
 
@@ -99,7 +112,7 @@ class Patcher:
         print("overlap_x: {}, overlap_y: {}, patched_image_size: {}, num_x_patches: {}, num_y_patches: {}".format(overlap_x, overlap_y, len(patches), num_x_patches, num_y_patches))
 
 
-    def recombine(self, image_path, output_path):
+    def extract(self, image_path: str):
 
         patches_dataset = self.patches_file[image_path.split(os.path.sep)[-1][:-4]]["patches"]
         num_x_patches = patches_dataset.attrs["num_x_patches"]
@@ -109,11 +122,22 @@ class Patcher:
 
         patches = np.empty([num_x_patches * num_y_patches, patch_size, patch_size, 3], dtype=np.uint8)
 
+        for i, patch in enumerate(self.PatchGrabber(image_path, self.patches_file)):
+                patches[i] = patch
+
+        return patches
+
+    def recombine(self, image_path: str):
+
+        patches_dataset = self.patches_file[image_path.split(os.path.sep)[-1][:-4]]["patches"]
+        num_x_patches = patches_dataset.attrs["num_x_patches"]
+        num_y_patches = patches_dataset.attrs["num_y_patches"]
+        patch_size = patches_dataset.attrs["patch_size"]
+        overlap = [patches_dataset.attrs["overlap_x"], patches_dataset.attrs["overlap_y"]]
+
         print("Extracting Patches")
         
-        for i, patch in enumerate(self.PatchGrabber(image_path, self.patches_file)):
-
-                patches[i] = patch
+        patches = self.extract(image_path)
         
         start = 0
 
@@ -176,9 +200,6 @@ class Patcher:
                         t[:overlap[1]] = self.calc_avg_overlap(up_patch, t, overlap[1], 'y')
                         recon_img = np.concatenate((recon_img, curr_patch), axis=1) #don't remove anything if final patch
 
-                
-                
-
             start += num_x_patches
             if row_num == 0:
                 rows = recon_img
@@ -190,8 +211,6 @@ class Patcher:
 
         return rows
         
-
-    
         
     def calc_avg_overlap(self, region1, region2, overlap, orientation):
         if orientation == 'x':
@@ -225,8 +244,6 @@ class Patcher:
             patch_anchor = patches_dataset[self.patch_index]
             patch_level = patches_dataset.attrs["level"]
             patch_size = patches_dataset.attrs["patch_size"]
-            # print(patch_anchor)
-            # print(patch_anchor)
             self.patch_index += 1
             image_array =  np.array(self.image.read_region((*list(patch_anchor),), patch_level, (patch_size, patch_size)))[:,:,:3] #Just grab RGB not A
             
@@ -234,6 +251,12 @@ class Patcher:
         
         def __del__(self):
             self.patches_file.close()
+
+    class PatchHandler:
+
+        def __init__(self, patch_path, use_hdf5):
+            pass
+
 
 
     
