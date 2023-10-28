@@ -140,7 +140,7 @@ def recombine_from_patches_array(patches, overlap, num_x_patches, num_y_patches)
     # im.save(PATH_TO_METADATA + "recombination.jpeg", quality=100)
 
 '''
-    This function takes an folder of patches (intended to be pixel-wise numerical class predications)
+    This function takes a folder of patches (intended to be pixel-wise numerical class predications)
     and recombines them by using information recorded during the inital patching 
     (metadata - overlap x, overlap y, # x patches, # y patches).  The general logic is that a patch can either
     be at the end of a row / column, or not.  This gives 4 possible states.  If it's not at the end
