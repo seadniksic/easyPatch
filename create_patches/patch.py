@@ -3,13 +3,8 @@ import numpy as np
 import math
 from PIL import Image
 from tqdm import tqdm
-import shutil
 import h5py
-import time
 import os
-import pyvips
-
-QUALITY = 100
 
 class Patcher:
 
@@ -21,9 +16,9 @@ class Patcher:
         if use_hdf5:
             try: 
                 self.patches_file = h5py.File(os.path.join(patch_path, "patches.h5"), "w")
-                print(f"Patches file {os.path.join(patch_path, 'patches.h5')} already exists")
             except:
                 self.patches_file = h5py.File(os.path.join(patch_path, "patches.h5"), "r")
+                print(f"Patches file {os.path.join(patch_path, 'patches.h5')} already exists")
         else:
             self.patches_file = os.path.join(patch_path, 'patches')
 
@@ -41,7 +36,8 @@ class Patcher:
     
 
     def __del__(self):
-        self.patches_file.close()
+        if self.use_hdf5:
+            self.patches_file.close()
     
 
     def patch(self, image_path: str, patch_size: int, overlap=0, level=0, mask_path: str=None, return_patches: bool=True):
@@ -50,6 +46,9 @@ class Patcher:
 
         #create group in hdf5 file to store patches
         image_name = image_path.split(os.path.sep)[-1][:-4]
+
+        if self.patch_handler.patches_exist(image_name):
+            del self.patches_file[image_name]
 
         self.patch_handler.make_group(image_name)
 
@@ -88,7 +87,7 @@ class Patcher:
                     num_y_patches -= 1
                     overlap_y = math.ceil((patch_size * num_y_patches - im_y_dim)/ (num_y_patches - 1))
         
-        self.patch_handler.create_dataset("patches", num_x_patches, num_y_patches, patch_size, "i8", return_patches)
+        self.patch_handler.create_dataset("patches", num_x_patches, num_y_patches, patch_size, "i8", return_patches, image_name)
         
         patch_count = 0  #Used to keep track of patch location in patched_image array
         anchor = np.array([0,0]) #top left corner of patch
@@ -97,7 +96,7 @@ class Patcher:
             for j in range(num_x_patches):
                 
                 #Read patch and assign it to array that will be returned
-                self.patch_handler.store_patch(im, patch_count, anchor, level, patch_size, return_patches)
+                self.patch_handler.store_patch(im, patch_count, anchor, level, patch_size, image_name, return_patches)
 
                 patch_count += 1
                 #shift reading frame to the right - im.level_downsamples used to upsample the shift amount since top left coord is based on level 0
@@ -109,40 +108,17 @@ class Patcher:
         self.patch_handler.write_metadata(image_name, "patches", overlap_x, overlap_y, num_x_patches, num_y_patches, level, patch_size)
 
         if return_patches:
-            return self.patch_handler.return_patches()
-
-
-    def extract(self, image_path: str):
-
-        # patches_dataset, num_x_patches, num_y_patches, patch_size, overlap =  self.patch_handler.read_metadata()
-        return self.patch_handler.extract_patches(self, image_path.split(os.path.sep)[-1][:-4])
+            return self.patch_handler.grab_patches()
 
     def recombine(self, image_path: str):
 
         name = image_path.split(os.path.sep)[-1][:-4]
-        print(image_path.split(os.path.sep)[-1][:-4])
 
-        # print( list(self.patches_file.keys()))
+        num_x_patches, num_y_patches, patch_size, patch_level, overlap = self.patch_handler.load_metadata(image_path)
 
-        if self.use_hdf5:
-
-            patches_dataset = self.patches_file[image_path.split(os.path.sep)[-1][:-4]]["patches"]
-            num_x_patches = patches_dataset.attrs["num_x_patches"]
-            num_y_patches = patches_dataset.attrs["num_y_patches"]
-            patch_size = patches_dataset.attrs["patch_size"]
-            overlap = [patches_dataset.attrs["overlap_x"], patches_dataset.attrs["overlap_y"]]
-
-        else:
-            with open(os.path.join(self.patches_file, image_path.split(os.path.sep)[-1][:-4], 'overlap.txt'), "r") as f:
-                overlap = []
-                overlap.append(int(f.readline()))
-                overlap.append(int(f.readline()))
-                num_x_patches = int(f.readline())
-                num_y_patches = int(f.readline())
-
-        print("Extracting Patches")
+        print(f"Extracting Patches from {name} ")
         
-        patches = self.extract(image_path, name)
+        patches = self.patch_handler.load_patches(self, image_path)
         
         start = 0
 
@@ -210,7 +186,7 @@ class Patcher:
                 rows = recon_img
             else:
                 rows = np.concatenate((rows, recon_img), axis=0)
-                # print("Array Size" + str(rows.size * rows.itemsize))
+                # print("Array Size In Memory" + str(rows.size * rows.itemsize))
 
         print("New shape: {}".format(rows.shape))
 
@@ -230,41 +206,15 @@ class Patcher:
             return overlap_average
     
 
-    # class PatchGrabber:
-
-    #     def __init__(self, image_path, patches_file):
-    #         self.patches_file = patches_file
-    #         self.image_path = image_path
-    #         self.image = op.OpenSlide(self.image_path)
-    #         self.max_count = self.patches_file[self.image_path.split(os.path.sep)[-1][:-4]]["patches"].shape[0]
-
-    #     def __iter__(self):
-    #         self.patch_index = 0
-    #         return self
-
-    #     def __next__(self):
-    #         if self.patch_index == self.max_count:
-    #             raise StopIteration
-    #         patches_dataset = self.patches_file[self.image_path.split(os.path.sep)[-1][:-4]]["patches"]
-    #         patch_anchor = patches_dataset[self.patch_index]
-    #         patch_level = patches_dataset.attrs["level"]
-    #         patch_size = patches_dataset.attrs["patch_size"]
-    #         # print(patch_anchor)
-    #         # print(patch_anchor)
-    #         self.patch_index += 1
-    #         image_array =  np.array(self.image.read_region((*list(patch_anchor),), patch_level, (patch_size, patch_size)))[:,:,:3] #Just grab RGB not A
-            
-    #         return image_array
-        
-    #     def __del__(self):
-    #         self.patches_file.close()
-
     class PatchIterator:
-        def __init__(self, parent, image, patches_file, max_count):
+        def __init__(self, parent, image, patches_file, max_count, patch_size, patch_level, image_name):
             self.parent = parent
             self.patches_file = patches_file
             self.image = image
+            self.image_name = image_name
             self.max_count = max_count
+            self.patch_size = patch_size
+            self.patch_level = patch_level
 
         def __iter__(self):
             self.patch_index = 0
@@ -273,57 +223,19 @@ class Patcher:
         def __next__(self):
             if self.patch_index == self.max_count:
                 raise StopIteration
-            patch = self.parent.PatchHandler.get_patch(self.image, self.patches_file, self.patch_index, self.image_name)
+            patch = self.parent.patch_handler.get_patch(self.image, self.patches_file[self.patch_index], self.patch_index, self.image_name, self.patch_size, self.patch_level)
             self.patch_index += 1
             return patch
-
-            
-        
-        def __del__(self):
-            self.patches_file.close()
-
-
 
     class PatchHandler:
 
         def __init__(self, patches_file, use_hdf5):
 
             self.patches_file = patches_file
-
-            # self.patch_path = patch_path              
+         
             self.use_hdf5 = use_hdf5
 
-        # def __iter__(self):
-        #     self.patch_index = 0
-        #     return self
-        
-        # def __next__(self):
-        #     if self.patch_index == self.max_count:
-        #         raise StopIteration
-            
-        #     if self.use_hdf5:
-        #         patches_dataset = self.patches_file[self.image_path.split(os.path.sep)[-1][:-4]]["patches"]
-        #         patch_anchor = patches_dataset[self.patch_index]
-        #         patch_level = patches_dataset.attrs["level"]
-        #         patch_size = patches_dataset.attrs["patch_size"]
-        #         self.patch_index += 1
-        #         image_array =  np.array(self.image.read_region((*list(patch_anchor),), patch_level, (patch_size, patch_size)))[:,:,:3] #Just grab RGB not A
-            
-        #     return image_array
-        
-        # def initiate_iterator(self, image_path):
-
-        #     image_name = image_path.split(os.path.sep)[-1][:-4]
-
-        #     if  image_name not in self.patches_file:
-        #         print(f"Patches for {image_name} do not exist")
-        #         return
-            
-        #     if use
-
-        #     self.max_count = self.patches_file[self.image_path.split(os.path.sep)[-1][:-4]]["patches"].shape[0]
-
-        def return_patches(self):
+        def grab_patches(self):
             temp_patch_holder = self.patched_image
             self.patched_image = np.array([])
 
@@ -346,24 +258,38 @@ class Patcher:
                 if not os.path.exists(os.path.join(self.patches_file, group_name)):
                     os.makedirs(os.path.join(self.patches_file, group_name))
 
-        def create_dataset(self, name, num_x_patches, num_y_patches, patch_size, type, return_patches):
+        def create_dataset(self, name, num_x_patches, num_y_patches, patch_size, type, return_patches, image_name):
 
             if self.use_hdf5:
-                self.patches_file.create_dataset(name, (num_x_patches * num_y_patches, 2), type)
+                self.patches_file[image_name].create_dataset(name, (num_x_patches * num_y_patches, 2), type)
             if return_patches:
                 self.patched_image = np.empty([num_x_patches * num_y_patches, patch_size, patch_size, 3], dtype=np.uint8)
 
         def store_patch(self, image, patch_index, anchor, level, patch_size, image_name, return_patches):
-            
-            if return_patches:
-                    self.patched_image[patch_index] = image.read_region((*list(anchor),), level, (patch_size, patch_size))[:,:,:3] #Just grab RGB not A
-            
+        
             if self.use_hdf5:
-                self.patches_file[image_name][patch_index] = anchor.copy()
-            else:
-                self.patched_image[patch_index].save(os.path.join(self.patches_file, image_name, f"{patch_index}.png"))
+                
+                self.patches_file[image_name]["patches"][patch_index] = anchor.copy()
 
-        def get_patch(): 
+                if return_patches:
+                    temp_image = image.read_region((*list(anchor),), level, (patch_size, patch_size))
+                    self.patched_image[patch_index] = np.array(temp_image)[:,:,:3] #Just grab RGB not A
+
+            else:
+
+                if return_patches:
+                    temp_image = image.read_region((*list(anchor),), level, (patch_size, patch_size))
+                    self.patched_image[patch_index] = np.array(temp_image)[:,:,:3] #Just grab RGB not A
+
+                temp_image.save(os.path.join(self.patches_file, image_name, "patches", f"{patch_index}.png"))
+
+        def get_patch(self, image, patches_file, patch_index, image_name, patch_size, patch_level):
+
+            if self.use_hdf5:
+                anchor = patches_file[image_name]["patches"][patch_index]
+                return np.array(image.read_region((*list(anchor),), patch_level, (patch_size, patch_size)))[:,:,:3] #Just grab RGB not A
+            else:
+                return np.array(Image.open(patches_file))[:,:,:3] 
                 
         def write_metadata(self, image, dataset_name, overlap_x, overlap_y, num_x_patches, num_y_patches, level, patch_size):
 
@@ -380,17 +306,41 @@ class Patcher:
                 dataset.attrs["patch_size"] = patch_size
 
             else:
-                metadata = [overlap_x, overlap_y, num_x_patches, num_y_patches]
-                with open("{}/{}/overlap.txt".format(self.patches_file, image), 'w') as f:        
+                metadata = [overlap_x, overlap_y, num_x_patches, num_y_patches, level, patch_size]
+                with open(f"{self.patches_file}/{image}/overlap.txt", 'w') as f:        
                     f.write("\n".join([str(dim) for dim in metadata]))
+
+        def load_metadata(self, image_path):
+
+            image_name = image_path.split(os.path.sep)[-1][:-4]
+
+            if self.use_hdf5:
+                
+                patches_dataset = self.patches_file[image_name]["patches"]
+                num_x_patches = patches_dataset.attrs["num_x_patches"]
+                num_y_patches = patches_dataset.attrs["num_y_patches"]
+                patch_size = patches_dataset.attrs["patch_size"]
+                patch_level = patches_dataset.attrs["level"]
+                overlap = [patches_dataset.attrs["overlap_x"], patches_dataset.attrs["overlap_y"]]             
+
+            else:
+
+                with open(os.path.join(self.patches_file, image_path.split(os.path.sep)[-1][:-4], 'overlap.txt'), "r") as f:
+                    overlap = []
+                    overlap.append(int(f.readline()))
+                    overlap.append(int(f.readline()))
+                    num_x_patches = int(f.readline())
+                    num_y_patches = int(f.readline())
+                    patch_level = int(f.readline())
+                    patch_size = int(f.readline())
+
+            return num_x_patches, num_y_patches, patch_size, patch_level, overlap
+
 
         def load_patches(self, parent, image_path):
 
             image_name = image_path.split(os.path.sep)[-1][:-4]
             image_handler = op.OpenSlide(image_path)
-
-            patches = np.empty([num_x_patches * num_y_patches, patch_size, patch_size, 3], dtype=np.uint8)
-            patches_file = []
 
             if self.use_hdf5:
                 
@@ -401,47 +351,37 @@ class Patcher:
                 patch_level = patches_dataset.attrs["level"]
                 overlap = [patches_dataset.attrs["overlap_x"], patches_dataset.attrs["overlap_y"]]
 
-                max_count = self.patches_file[image_path.split(os.path.sep)[-1][:-4]]["patches"].shape[0]
-
-    #         patch_anchor = patches_dataset[self.patch_index]
-    #         patch_level = patches_dataset.attrs["level"]
-    #         patch_size = patches_dataset.attrs["patch_size"]                
+                max_count = self.patches_file[image_path.split(os.path.sep)[-1][:-4]]["patches"].shape[0]             
 
             else:
 
-                with open(os.path.join(self.patches_file, image_path.split(os.path.sep)[-1][:-4], 'overlap.txt'), "r") as f:
+                with open(os.path.join(self.patches_file, image_name, 'overlap.txt'), "r") as f:
                     overlap = []
                     overlap.append(int(f.readline()))
                     overlap.append(int(f.readline()))
                     num_x_patches = int(f.readline())
                     num_y_patches = int(f.readline())
+                    patch_level = int(f.readline())
+                    patch_size = int(f.readline())
 
-                ext_len = (4 if len(os.listdir(os.path.join(self.patches_file, image_path.split(os.path.sep)[-1][:-4], "patches"))[0].split(".")[-1]) == 3 else 5) #allow for recombination of .jpeg or png patches
-                self.patches_file = sorted(os.listdir(os.path.join(self.patches_file, image_name, "patches")), key= lambda img : int(img.split('_')[-1][:-ext_len]))
+                ext_len = (4 if len(os.listdir(os.path.join(self.patches_file, image_name, "patches"))[0].split(".")[-1]) == 3 else 5) #allow for recombination of .jpeg or png patches
+                self.patches_file = [os.path.join(self.patches_file, image_name, "patches", img) for img in sorted(os.listdir(os.path.join(self.patches_file, image_name, "patches")), key= lambda img : int(img.split('_')[-1][:-ext_len]))]
 
-                # patches = []
-                # for img in sorted_patch_images:
-                #     arr = np.array(Image.open(os.path.join(self.patches_file, image_path.split(os.path.sep)[-1][:-4], "patches", img)))
-                #     patches.append(arr)
+                max_count = len(self.patches_file)
 
-                # patches = np.array(patches)
+            patches = np.empty([num_x_patches * num_y_patches, patch_size, patch_size, 3], dtype=np.uint8)
 
-            for i, patch in enumerate(parent.PatchIterator(parent, image_handler, self.patches_file, max_count)):
-                        patches[i] = patch
+            with tqdm(total=max_count) as progress_bar:
+                for i, patch in tqdm(enumerate(parent.PatchIterator(parent, image_handler, self.patches_file, max_count, patch_size, patch_level, image_name))):
+                    patches[i] = patch
+                    progress_bar.update(1)
+
             return patches
-
-        # def read_metadata(self, dataset):
-
-            # if use_hdf5:
-
-            #     num_x_patches = patches_dataset.attrs["num_x_patches"]
-            #     num_y_patches = patches_dataset.attrs["num_y_patches"]
-            #     patch_size = patches_dataset.attrs["patch_size"]
-            #     overlap = [patches_dataset.attrs["overlap_x"], patches_dataset.attrs["overlap_y"]]
 
 
         def __del__(self):
-            self.patches_file.close()
+            if self.use_hdf5:
+                self.patches_file.close()
                 
 
 
