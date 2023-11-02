@@ -40,7 +40,7 @@ class Patcher:
             self.patches_file.close()
     
 
-    def patch(self, image_path: str, patch_size: int, overlap=0, level=0, mask_path: str=None, return_patches: bool=True, filter=lambda a,b,c,d,e: False):
+    def patch(self, image_path: str, patch_size: int, overlap=0, level=0, mask_path: str=None, return_patches: bool=True, filter=None):
 
         self.patch_handler.return_patches = return_patches
 
@@ -89,6 +89,7 @@ class Patcher:
         
         self.patch_handler.create_dataset("patches", num_x_patches, num_y_patches, patch_size, "i8", return_patches, image_name)
         
+        filtered_patch_count = 0
         patch_count = 0  #Used to keep track of patch location in patched_image array
         anchor = np.array([0,0]) #top left corner of patch
         
@@ -96,8 +97,9 @@ class Patcher:
             for j in range(num_x_patches):
                 
                 #Read patch and assign it to array that will be returned
-                patch_stored = self.patch_handler.store_patch(im, patch_count, anchor, level, patch_size, image_name, return_patches, filter)
-                patch_count = patch_count + 1 if patch_stored else patch_count
+                patch_stored = self.patch_handler.store_patch(im, patch_count, filtered_patch_count, anchor, level, patch_size, image_name, return_patches, filter)
+                filtered_patch_count +=  1 if patch_stored else 0
+                patch_count += 1
 
                 #shift reading frame to the right - im.level_downsamples used to upsample the shift amount since top left coord is based on level 0
                 anchor[0] += round(im.level_downsamples[level]) * (patch_size - overlap_x)
@@ -198,8 +200,6 @@ class Patcher:
 
         return rows
     
-    
-        
         
     def calc_avg_overlap(self, region1, region2, overlap, orientation):
         if orientation == 'x':
@@ -264,7 +264,8 @@ class Patcher:
                 self.patches_file.create_group(group_name)
             else: 
                 if not os.path.exists(os.path.join(self.patches_file, group_name)):
-                    os.makedirs(os.path.join(self.patches_file, group_name))
+                    os.makedirs(os.path.join(self.patches_file, group_name, "patches"))
+                    os.makedirs(os.path.join(self.patches_file, group_name, "filtered_patches"))
 
         def create_dataset(self, name, num_x_patches, num_y_patches, patch_size, type, return_patches, image_name):
 
@@ -273,31 +274,47 @@ class Patcher:
             if return_patches:
                 self.patched_image = np.empty([num_x_patches * num_y_patches, patch_size, patch_size, 3], dtype=np.uint8)
 
-        def store_patch(self, image, patch_index, anchor, level, patch_size, image_name, return_patches, filter):
+        def store_patch(self, image, patch_index, filtered_patch_index, anchor, level, patch_size, image_name, return_patches, filter):
+
+            filter_accept = False
 
             if self.use_hdf5:
                 
                 self.patches_file[image_name]["patches"][patch_index] = anchor.copy()
 
                 if return_patches:
-                    temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)))
-                    filter_out, temp_image = filter(image, temp_image, anchor, level, patch_size)
-                    if filter_out:
-                        return False
+                    temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)), dtype=np.uint8)
+                    if filter != None:
+                        filter_accept, temp_image = filter(image, temp_image, anchor, level, patch_size)
                     self.patched_image[patch_index] = temp_image[:,:,:3] #Just grab RGB not A
-
+                    
+                if filter != None:
+                    if not filter_accept:
+                        return False
+                    else:
+                        return True
+                else:
+                    return False     
             else:
 
                 if return_patches:
-                    temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)))
-                    filter_out, temp_image = filter(image, temp_image, anchor, level, patch_size)
-                    if filter_out:
-                        return False
+                    temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)), dtype=np.uint8)
+                    if filter != None:
+                        filter_accept, temp_image = filter(image, temp_image, anchor, level, patch_size)
                     self.patched_image[patch_index] = temp_image[:,:,:3] #Just grab RGB not A
 
-                temp_image.save(os.path.join(self.patches_file, image_name, "patches", f"{patch_index}.png"))
-
-            return True
+                # Not the most efficient implementation, reading twice and not caching patches that are rejected by the filter
+                temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)), dtype=np.uint8)
+                Image.fromarray(temp_image).save(os.path.join(self.patches_file, image_name, "patches", f"{patch_index}.png"))
+                
+                if filter != None:
+                    if not filter_accept:
+                        return False
+                    else:
+                        Image.fromarray(temp_image).save(os.path.join(self.patches_file, image_name, "filtered_patches", f"{patch_index}.png"))
+                        return True
+                else:
+                    return False
 
         def get_patch(self, image, patches_file, patch_index, image_name, patch_size, patch_level):
 
