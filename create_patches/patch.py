@@ -278,7 +278,7 @@ class Patcher:
 
             filter_accept = False
 
-            if self.use_hdf5:
+            if self.use_hdf5:  # filtering is not supported for hdf5 at the moment
                 
                 self.patches_file[image_name]["patches"][patch_index] = anchor.copy()
 
@@ -308,6 +308,7 @@ class Patcher:
                 Image.fromarray(temp_image).save(os.path.join(self.patches_file, image_name, "patches", f"{patch_index}.png"))
                 
                 if filter != None:
+                    filter_accept, altered_image = filter(image, temp_image, anchor, level, patch_size)
                     if not filter_accept:
                         return False
                     else:
