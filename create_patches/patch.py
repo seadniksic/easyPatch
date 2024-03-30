@@ -5,6 +5,9 @@ from PIL import Image
 from tqdm import tqdm
 import h5py
 import os
+import numpy.typing as npt
+               
+               
 
 class Patcher:
 
@@ -18,7 +21,7 @@ class Patcher:
                 self.patches_file = h5py.File(os.path.join(patch_path, "patches.h5"), "w")
             except:
                 self.patches_file = h5py.File(os.path.join(patch_path, "patches.h5"), "r")
-                print(f"Patches file {os.path.join(patch_path, 'patches.h5')} already exists")
+                print(f"Patches file {os.path.join(patch_path, 'patches.h5')} already exists.  Will overwrite or append.")
         else:
             self.patches_file = os.path.join(patch_path, 'patches')
 
@@ -88,7 +91,10 @@ class Patcher:
                     overlap_y = math.ceil((patch_size * num_y_patches - im_y_dim)/ (num_y_patches - 1))
         
         self.patch_handler.create_dataset("patches", num_x_patches, num_y_patches, patch_size, "i8", return_patches, image_name)
-        
+
+        if filter != None:
+            self.patch_handler.create_dataset("filtered_patches", num_x_patches, num_y_patches, patch_size, "i8", return_patches, image_name)
+
         filtered_patch_count = 0
         patch_count = 0  #Used to keep track of patch location in patched_image array
         anchor = np.array([0,0]) #top left corner of patch
@@ -276,47 +282,57 @@ class Patcher:
 
         def store_patch(self, image, patch_index, filtered_patch_index, anchor, level, patch_size, image_name, return_patches, filter):
 
+            ''' If return true, 1 added to filtered patch count.  Else 0. '''
+
             filter_accept = False
 
-            if self.use_hdf5:  # filtering is not supported for hdf5 at the moment
-                
+            if self.use_hdf5:
+
                 self.patches_file[image_name]["patches"][patch_index] = anchor.copy()
 
-                if return_patches:
-                    temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)), dtype=np.uint8)
-                    if filter != None:
-                        filter_accept, temp_image = filter(image, temp_image, anchor, level, patch_size)
-                    self.patched_image[patch_index] = temp_image[:,:,:3] #Just grab RGB not A
-                    
                 if filter != None:
+
+                    temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)), dtype=np.uint8)
+                    filter_accept, altered_image = filter(image, temp_image, anchor, level, patch_size)
+
+                    if return_patches:
+                        self.patched_image[patch_index] = altered_image[:,:,:3] #Just grab RGB not A
+
                     if not filter_accept:
                         return False
                     else:
+                        self.patches_file[image_name]["filtered_patches"][patch_index] = anchor.copy()
                         return True
                 else:
-                    return False     
+                    if return_patches:
+                        temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)), dtype=np.uint8)
+                        self.patched_image[patch_index] = temp_image[:,:,:3] #Just grab RGB not A
+
+                    return False
+
             else:
 
-                if return_patches:
-                    temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)), dtype=np.uint8)
-                    if filter != None:
-                        filter_accept, temp_image = filter(image, temp_image, anchor, level, patch_size)
-                    self.patched_image[patch_index] = temp_image[:,:,:3] #Just grab RGB not A
-
-                # Not the most efficient implementation, reading twice and not caching patches that are rejected by the filter
                 temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)), dtype=np.uint8)
                 Image.fromarray(temp_image).save(os.path.join(self.patches_file, image_name, "patches", f"{patch_index}.png"))
-                
+
                 if filter != None:
                     filter_accept, altered_image = filter(image, temp_image, anchor, level, patch_size)
+
+                    if return_patches:
+                        self.patched_image[patch_index] = altered_image[:,:,:3] #Just grab RGB not A
+
                     if not filter_accept:
                         return False
                     else:
                         Image.fromarray(temp_image).save(os.path.join(self.patches_file, image_name, "filtered_patches", f"{patch_index}.png"))
                         return True
                 else:
+                    if return_patches:
+                        self.patched_image[patch_index] = temp_image[:,:,:3] #Just grab RGB not A
+
                     return False
 
+               
         def get_patch(self, image, patches_file, patch_index, image_name, patch_size, patch_level):
 
             if self.use_hdf5:
