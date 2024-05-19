@@ -1,6 +1,6 @@
 ## easyPatch
 -------------
-** this repo is currently under construction and prone to change
+** this repo is currently under construction, poorly documented, and prone to change
 
 ### About
 
