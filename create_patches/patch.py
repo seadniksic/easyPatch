@@ -11,15 +11,15 @@ import numpy.typing as npt
 
 class Patcher:
 
-    def __init__(self, patch_path, use_hdf5=True):
+    def __init__(self, patch_path, patches_file="patches", use_hdf5=True):
 
         self.use_hdf5 = use_hdf5
         self.patch_path = patch_path
 
         if use_hdf5:
-            self.patches_file = h5py.File(os.path.join(patch_path, "patches.h5"), "a")
+            self.patches_file = h5py.File(os.path.join(patch_path, f"{patches_file}.h5"), "a")
         else:
-            self.patches_file = os.path.join(patch_path, 'patches')
+            self.patches_file = os.path.join(patch_path, patches_file)
 
         #create PatchHandler Object as abstraction for handling how / where to save patches
         self.patch_handler = self.PatchHandler(self.patches_file, use_hdf5)
