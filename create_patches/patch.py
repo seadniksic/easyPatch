@@ -48,7 +48,7 @@ class Patcher:
 
         if self.patch_handler.patches_exist(image_name):
             if not force_overwrite:
-                print("Patches exist, skipping")
+                print(f"Patches exist for {image_name}, skipping")
                 return
 
             print(f"Patches for {image_path.split(os.path.sep)[-1]} already exist but force_overwrite is True. Overwriting.")
@@ -114,7 +114,7 @@ class Patcher:
             for _ in range(num_x_patches):
                 
                 #Read patch and assign it to array that will be returned
-                patch_stored = self.patch_handler.store_patch(im, patch_count, filtered_patch_count, anchor, level, patch_size, image_name, return_patches, filter, round(im.level_downsamples[level]))
+                patch_stored = self.patch_handler.store_patch(im, patch_count, filtered_patch_count, anchor, level, patch_size, image_name, return_patches, filter)
                 filtered_patch_count +=  1 if patch_stored else 0
                 patch_count += 1
 
@@ -357,7 +357,7 @@ class Patcher:
         def patches_exist(self, group_name):
 
             if self.use_hdf5:
-                return (True if group_name in self.patches_file else False)
+                return (group_name in self.patches_file)
 
             # TODO finish if not using hdf5
 
@@ -381,7 +381,7 @@ class Patcher:
             if return_patches:
                 self.patched_image = np.empty([num_x_patches * num_y_patches, patch_size, patch_size, 3], dtype=np.uint8)
 
-        def store_patch(self, image, patch_index, filtered_patch_index, anchor, level, patch_size, image_name, return_patches, filter, downsample):
+        def store_patch(self, image, patch_index, filtered_patch_index, anchor, level, patch_size, image_name, return_patches, filter):
 
             ''' If return true, 1 added to filtered patch count.  Else 0. '''
 
@@ -394,7 +394,7 @@ class Patcher:
                 if filter != None:
 
                     temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)), dtype=np.uint8)
-                    filter_accept, altered_image = filter(image, temp_image, anchor, level, patch_size, downsample)
+                    filter_accept, altered_image = filter(image, temp_image, anchor, print_out= "P2" if image_name == "P2" else None)
 
                     if return_patches:
                         self.patched_image[patch_index] = altered_image[:,:,:3] #Just grab RGB not A
@@ -418,7 +418,7 @@ class Patcher:
                 Image.fromarray(temp_image).save(os.path.join(self.patches_file, image_name, "patches", f"{patch_index}.png"))
 
                 if filter != None:
-                    filter_accept, altered_image = filter(image, temp_image, anchor, level, patch_size, downsample)
+                    filter_accept, altered_image = filter(image, temp_image, anchor)
 
                     if return_patches:
                         self.patched_image[patch_index] = altered_image[:,:,:3] #Just grab RGB not A
