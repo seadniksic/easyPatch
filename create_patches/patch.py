@@ -69,30 +69,38 @@ class Patcher:
             return
 
         #calculate number of patches in x and y direction
-        num_x_patchest = math.ceil(im_x_dim / patch_size)
-        num_y_patchest = math.ceil(im_y_dim / patch_size)
+        num_x_patchest = math.ceil(im_x_dim / patch_size) if overlap != None else math.floor(im_x_dim / patch_size)
+        num_y_patchest = math.ceil(im_y_dim / patch_size) if overlap != None else math.floor(im_y_dim / patch_size)
 
-        num_x_patches = num_x_patchest + overlap
-        num_y_patches = num_y_patchest + overlap
+        num_x_patches = num_x_patchest + (overlap if overlap != None else 0)
+        num_y_patches = num_y_patchest + (overlap if overlap != None else 0)
 
-        #Find overlap necessary to make patches fit
-        overlap_x = math.ceil((patch_size * num_x_patches - im_x_dim)/ (num_x_patches - 1))
-        overlap_y = math.ceil((patch_size * num_y_patches - im_y_dim)/ (num_y_patches - 1))
+        if num_x_patches == 0 or num_y_patches == 0:
+            print("image smaller than single patch size")
+            return
 
-        #Ensure overlap in either direction does not cross the max threshold (1/2 patch size)
-        max_overlap = int(patch_size / 2)
-        if overlap_x > max_overlap or overlap_y > max_overlap:
-            if overlap_x > max_overlap:
-                print(f'Overlap (X = {overlap_x}) Exceeds Max Value of {max_overlap}')
-                while overlap_x > max_overlap:
-                    num_x_patches -= 1
-                    overlap_x = math.ceil((patch_size * num_x_patches - im_x_dim)/ (num_x_patches - 1))
-            if overlap_y > max_overlap:
-                print(f'Overlap (Y = {overlap_y}) Exceeds Max Value of {max_overlap}')
-                while overlap_y > max_overlap:
-                    num_y_patches -= 1
-                    overlap_y = math.ceil((patch_size * num_y_patches - im_y_dim)/ (num_y_patches - 1))
+        if (overlap == None):
+            overlap_x = 0
+            overlap_y = 0
+        else:
+            #Find overlap necessary to make patches fit
+            overlap_x = math.ceil((patch_size * num_x_patches - im_x_dim)/ (num_x_patches - 1))
+            overlap_y = math.ceil((patch_size * num_y_patches - im_y_dim)/ (num_y_patches - 1))
 
+            #Ensure overlap in either direction does not cross the max threshold (1/2 patch size)
+            max_overlap = int(patch_size / 2)
+            if overlap_x > max_overlap or overlap_y > max_overlap:
+                if overlap_x > max_overlap:
+                    print(f'Overlap (X = {overlap_x}) Exceeds Max Value of {max_overlap}')
+                    while overlap_x > max_overlap:
+                        num_x_patches -= 1
+                        overlap_x = math.ceil((patch_size * num_x_patches - im_x_dim)/ (num_x_patches - 1))
+                if overlap_y > max_overlap:
+                    print(f'Overlap (Y = {overlap_y}) Exceeds Max Value of {max_overlap}')
+                    while overlap_y > max_overlap:
+                        num_y_patches -= 1
+                        overlap_y = math.ceil((patch_size * num_y_patches - im_y_dim)/ (num_y_patches - 1))
+        
         self.patch_handler.create_dataset("patches", num_x_patches, num_y_patches, patch_size, "i8", return_patches, image_name)
 
         if filter != None:
@@ -101,12 +109,12 @@ class Patcher:
         filtered_patch_count = 0
         patch_count = 0  #Used to keep track of patch location in patched_image array
         anchor = np.array([0,0]) #top left corner of patch
-
-        for i in tqdm(range(num_y_patches)):
-            for j in range(num_x_patches):
-
+        
+        for _ in tqdm(range(num_y_patches)):
+            for _ in range(num_x_patches):
+                
                 #Read patch and assign it to array that will be returned
-                patch_stored = self.patch_handler.store_patch(im, patch_count, filtered_patch_count, anchor, level, patch_size, image_name, return_patches, filter)
+                patch_stored = self.patch_handler.store_patch(im, patch_count, filtered_patch_count, anchor, level, patch_size, image_name, return_patches, filter, round(im.level_downsamples[level]))
                 filtered_patch_count +=  1 if patch_stored else 0
                 patch_count += 1
 
@@ -208,8 +216,95 @@ class Patcher:
         print("New shape: {}".format(rows.shape))
 
         return rows
+    
+    def recombine_no_overlap(self, image_path: str=None, patches=None, metadata=None, from_array=False):
 
+        if not from_array:
+            name = image_path.split(os.path.sep)[-1][:-4]
 
+            num_x_patches, num_y_patches, patch_size, patch_level, overlap = self.patch_handler.load_metadata(image_path)
+
+            print(f"Extracting Patches from {name} ")
+            
+            patches = self.patch_handler.load_patches(self, image_path)
+        
+        else:
+
+            print(f"Loading array patches")
+            num_x_patches, num_y_patches, patch_size, patch_level, overlap = metadata
+        
+        start = 0
+
+        print("Beginning Recombination")
+
+        recon_img = patches[0][:, :] #Set first patch in place
+
+        for row_num in range(num_y_patches):
+            for patch_num in range(start, num_x_patches+start):
+
+                if patch_num == 0 and row_num == 0: #Already set the first patch
+                    continue
+                
+                curr_patch = patches[patch_num]
+                
+                if patch_num + 1 != num_x_patches + start: 
+
+                    t = curr_patch[:, :]
+
+                    if patch_num  % num_x_patches != 0:
+                        left_patch = patches[patch_num - 1]
+                        # t[:, :] = self.calc_avg_overlap(left_patch, curr_patch, overlap[0], 'x')
+
+                    if row_num + 1 != num_y_patches:
+                        #option 1, neither end y or end x
+                        
+                        t = t[:]
+
+                        if row_num != 0:
+                            up_patch = patches[patch_num - num_x_patches]
+                            # t[:overlap[1]] = self.calc_avg_overlap(up_patch[:, :-overlap[0]], t, overlap[1], 'y')
+
+                    else:
+                        #if not option 1, option 2 is not end x but end y
+                        pass
+
+                    if patch_num == start:
+                        recon_img = t
+                    else:   
+                        recon_img = np.concatenate((recon_img, t), axis=1)
+
+                else:
+                    if row_num + 1 != num_y_patches:
+                        #option 3, end x (not end y)
+                        t = curr_patch[:] #remove overlap from bottom
+                        left_patch = patches[patch_num - 1]
+                        # t[:, :overlap[0]] = self.calc_avg_overlap(left_patch[:-overlap[1]], t, overlap[0], 'x')
+
+                        if row_num != 0:
+                            up_patch = patches[patch_num - num_x_patches]
+                            # t[:overlap[1]] = self.calc_avg_overlap(up_patch, t, overlap[1], 'y')
+
+                        recon_img = np.concatenate((recon_img, t), axis=1)
+                    else:
+                        #option 4, end x and end y
+                        t = curr_patch
+                        left_patch = patches[patch_num - 1]
+                        # t[:, :overlap[0]] = self.calc_avg_overlap(left_patch, t, overlap[0], 'x')
+                        up_patch = patches[patch_num - num_x_patches]
+                        # t[:overlap[1]] = self.calc_avg_overlap(up_patch, t, overlap[1], 'y')
+                        recon_img = np.concatenate((recon_img, curr_patch), axis=1) #don't remove anything if final patch
+
+            start += num_x_patches
+            if row_num == 0:
+                rows = recon_img
+            else:
+                rows = np.concatenate((rows, recon_img), axis=0)
+                # print("Array Size In Memory" + str(rows.size * rows.itemsize))
+
+        print("New shape: {}".format(rows.shape))
+
+        return rows
+        
     def calc_avg_overlap(self, region1, region2, overlap, orientation):
         if orientation == 'x':
             overlap_left = region1[:, -overlap:]
@@ -221,7 +316,6 @@ class Patcher:
             overlap_down = region2[:overlap]
             overlap_average = (overlap_up / 2) + (overlap_down / 2)
             return overlap_average
-
 
     class PatchIterator:
         def __init__(self, parent, image, patches_file, max_count, patch_size, patch_level, image_name):
@@ -287,7 +381,7 @@ class Patcher:
             if return_patches:
                 self.patched_image = np.empty([num_x_patches * num_y_patches, patch_size, patch_size, 3], dtype=np.uint8)
 
-        def store_patch(self, image, patch_index, filtered_patch_index, anchor, level, patch_size, image_name, return_patches, filter):
+        def store_patch(self, image, patch_index, filtered_patch_index, anchor, level, patch_size, image_name, return_patches, filter, downsample):
 
             ''' If return true, 1 added to filtered patch count.  Else 0. '''
 
@@ -300,7 +394,7 @@ class Patcher:
                 if filter != None:
 
                     temp_image = np.array(image.read_region((*list(anchor),), level, (patch_size, patch_size)), dtype=np.uint8)
-                    filter_accept, altered_image = filter(image, temp_image, anchor)
+                    filter_accept, altered_image = filter(image, temp_image, anchor, level, patch_size, downsample)
 
                     if return_patches:
                         self.patched_image[patch_index] = altered_image[:,:,:3] #Just grab RGB not A
@@ -324,7 +418,7 @@ class Patcher:
                 Image.fromarray(temp_image).save(os.path.join(self.patches_file, image_name, "patches", f"{patch_index}.png"))
 
                 if filter != None:
-                    filter_accept, altered_image = filter(image, temp_image, anchor)
+                    filter_accept, altered_image = filter(image, temp_image, anchor, level, patch_size, downsample)
 
                     if return_patches:
                         self.patched_image[patch_index] = altered_image[:,:,:3] #Just grab RGB not A
