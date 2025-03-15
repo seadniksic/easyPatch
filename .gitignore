@@ -1,4 +1,13 @@
 patches/
 
+# Python Caching
 *.pyc
 __pycache__/
+
+# common generated patch image types
+*.tif
+*.png
+*.jpg
+
+# patch containers
+*.h5

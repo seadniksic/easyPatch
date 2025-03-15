@@ -378,6 +378,7 @@ class Patcher:
                     self.patches_file[image_name].create_dataset(name, (num_x_patches * num_y_patches, 2), type)
                 elif name == "filtered_patches":
                     self.patches_file[image_name].create_dataset(name, (0, 2), type, maxshape=(None, None))
+                    self.patches_file[image_name].create_dataset("filt_seq_number", (0, 1), type, maxshape=(None, None))
             if return_patches:
                 self.patched_image = np.empty([num_x_patches * num_y_patches, patch_size, patch_size, 3], dtype=np.uint8)
 
@@ -404,6 +405,8 @@ class Patcher:
                     else:
                         self.patches_file[image_name]["filtered_patches"].resize((filtered_patch_index + 1, 2))
                         self.patches_file[image_name]["filtered_patches"][filtered_patch_index] = anchor.copy()
+                        self.patches_file[image_name]["filt_seq_number"].resize((filtered_patch_index + 1, 1))
+                        self.patches_file[image_name]["filt_seq_number"][filtered_patch_index] = patch_index
                         return True
                 else:
                     if return_patches:
