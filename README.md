@@ -9,7 +9,7 @@ This library allows you to easily patch histopathological images (whole slide im
  - generating a binary mask from ground truth XML annotations
  - recombining patches into original image dimension 
 
-easyPatch stores the generated patches in HDF5 files on disk as to not overwhelm RAM usage, as a single WSI can be constituted of thousands of patches depending on the zoom level. 
+easyPatch offers the ability to store patches as images on disk or save coordinates to an HDF5 file. 
 
 ### Usage
 
